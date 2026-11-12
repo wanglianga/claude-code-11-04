@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: recon-db
+    environment:
+      POSTGRES_USER: recon
+      POSTGRES_PASSWORD: recon
+      POSTGRES_DB: recon
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recon -d recon"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: recon-backend
+    environment:
+      # 应用启动时自动建表并安装只追加触发器（见 app/init_db.py）
+      RECON_DATABASE_URL: postgresql+asyncpg://recon:recon@db:5432/recon
+      RECON_ROUNDING_TOLERANCE: "0.05"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: recon-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+  # 一键装载模拟数据（8 类场景 + 完整处置/更正/版本链）：
+  #   docker compose run --rm seed
+  seed:
+    build: ./backend
+    container_name: recon-seed
+    profiles: ["seed"]
+    environment:
+      RECON_DATABASE_URL: postgresql+asyncpg://recon:recon@db:5432/recon
+      PYTHONPATH: /app
+    command: ["python", "scripts/seed.py", "--reset"]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
